@@ -1,0 +1,121 @@
+# 🛠️ Compliance Ledger – A Blockchain Simulation using SERN Stack
+
+This is a **project-based tutorial** that demonstrates core blockchain principles like **immutability**, **hash chaining**, and **auditable trust** using a full-stack JavaScript setup (SQL Server, Express, React, Node).
+
+---
+
+## 📚 What This Project Teaches
+
+This is **not a full blockchain**, but a simulation designed for learning and teaching. It shows how blockchains:
+- Use **linked hashes** to prevent tampering.
+- Ensure **immutability** through a strict append-only ledger.
+- Provide **trust through auditability**, without physical inspections.
+
+**Scenario:**  
+Industries submit compliance entries. These are recorded in a chain-like structure. A regulatory authority can verify the integrity of the entire record trail remotely.
+
+---
+
+## 🧱 Tech Stack (SERN)
+
+- **S**QL Server – stores the compliance ledger
+- **E**xpress – REST API for inserting and retrieving ledger entries
+- **R**eact – user interface for industry and regulator
+- **N**ode – backend logic, hash generation, and integrity checking
+
+---
+
+## 🚀 How It Works
+
+1. Each compliance entry contains:
+   - `industry_id`, `timestamp`, `data`, `hash`, and `prev_hash`
+2. When a new entry is added:
+   - It is **hashed** with the previous hash.
+   - This forms a **chain of trust** (like blocks in blockchain).
+3. On-chain verification:
+   - The regulator can verify the hash chain is **unbroken**.
+
+---
+
+## 🖥️ Screenshots
+
+- ✅ Add Compliance Entry
+- 📋 View All Entries in the Ledger
+- 🔍 Check if the Chain Has Been Tampered
+
+---
+
+## 🛠️ Installation & Setup
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/your-username/compliance-ledger.git
+cd compliance-ledger
+________________________________________
+2. Set up the SQL Server Database
+•	Run the following schema:
+sql
+CopyEdit
+CREATE TABLE ComplianceLedger (
+  id INT PRIMARY KEY IDENTITY,
+  industry_id INT NOT NULL,
+  timestamp DATETIME DEFAULT GETDATE(),
+  data NVARCHAR(MAX),
+  hash NVARCHAR(256),
+  prev_hash NVARCHAR(256)
+);
+________________________________________
+3. Set up the Backend
+bash
+CopyEdit
+cd server
+npm install
+•	Create a .env file with your database credentials:
+env
+CopyEdit
+DB_USER=your_user
+DB_PASSWORD=your_password
+DB_SERVER=localhost
+DB_DATABASE=compliance_db
+•	Start the server:
+bash
+CopyEdit
+node server.js
+It should run on http://localhost:5000.
+________________________________________
+4. Set up the Frontend
+bash
+CopyEdit
+cd ../client
+npm install
+npm start
+Runs at http://localhost:3000
+________________________________________
+✅ API Endpoints
+Method	Route	Description
+POST	/api/entry	Add a new compliance entry
+GET	/api/ledger	Fetch the entire ledger
+GET	/api/verify	Verify integrity of hash chain
+________________________________________
+💡 Concepts Demonstrated
+Blockchain Principle	This Project’s Simulation
+Block Hashing	hash = SHA256(currentData + prevHash)
+Immutability	No update/delete routes, DB designed as append-only
+Chain of Trust	Each entry stores hash of previous
+Tamper Detection	Hash mismatch during verification
+________________________________________
+🌱 Learning Extensions
+Want to take it further?
+•	Integrate digital signatures
+•	Add role-based login (industry vs. regulator)
+•	Migrate to Quorum or Hyperledger Fabric
+•	Add smart contract rules (e.g., flag overdue submissions)
+________________________________________
+👨‍🏫 License & Attribution
+This is an educational project, built to help learners understand the mechanics of blockchain in a practical, approachable way.
+MIT License – Free to use and adapt.
+________________________________________
+✨ Created By
+SK Verma
+Feel free to fork and build upon this. Let’s build trust — block by block.
