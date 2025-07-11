@@ -1,0 +1,30 @@
+{
+  "name": "b-chain-api",
+  "version": "1.0.0",
+  "description": "API for in-memory and file-based Blockchain",
+  "keywords": [
+    "blockchain",
+    "in-memory",
+    "file-based"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "y"
+  },
+  "license": "MIT",
+  "author": "sk verma",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon --watch . -e js index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "nodemon": "^3.1.10",
+    "sha256": "^0.2.0",
+    "sqlite3": "^5.1.7",
+    "uuid": "^11.1.0"
+  }
+}
