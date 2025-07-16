@@ -4,7 +4,7 @@ const transactionsRoutes = require('./routes/transactions'); // Import your tran
 const cors = require('cors'); // For handling Cross-Origin Resource Sharing
 
 const app = express();
-const PORT = process.env.PORT || 3000; // Use environment variable or default to 3000
+const PORT = process.argv[2]; // Use environment variable or default to 3000
 
 // Middleware
 app.use(cors()); // Enable CORS for all routes (important for React frontend)

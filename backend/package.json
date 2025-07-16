@@ -17,7 +17,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon --watch . -e js index.js"
+    "start": "nodemon --watch . -e js index.js",
+    "projA": "nodemon --watch . -e js index.js 3001 http://localhost:3001/api/fs 1 projA.db",
+    "projB": "nodemon --watch . -e js index.js 3002 http://localhost:3002/api/fs 2 projB.db",
+    "regAuth": "nodemon --watch . -e js index.js 3003 http://localhost:3003/api/fs 0 regAuth.db"
   },
   "dependencies": {
     "cors": "^2.8.5",
