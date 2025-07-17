@@ -2,12 +2,12 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
-const fileName = process.argv[5]; 
+const sha256 = require('sha256');
+const { v4: uuidv4 } = require('uuid');
 const theProj = process.argv[4]; // Get the project ID from command line arguments
+const fileName = process.argv[5]; 
 
 // Define the path for the SQLite database file.
-// For different nodes (A, X, B, Y), you would change this path
-// or pass it as an environment variable/config.
 const DB_FILE = path.join(__dirname, 'data', fileName); // Centralized DB file for this node
 console.log(`Using database file at: ${DB_FILE}`);
 
@@ -26,81 +26,71 @@ let db; // Global database instance for this module
 function initDb() {
     return new Promise((resolve, reject) => {
         db = new sqlite3.Database(DB_FILE, (err) => {
-            if (err) {
-                console.error('Error opening database:', err.message);
-                reject(err);
-            } else {
-                console.log(`Connected to the SQLite database at ${DB_FILE}`);
-                db.run(`CREATE TABLE IF NOT EXISTS bchain (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    transactions TEXT NOT NULL,
-                    nonce INTEGER NOT NULL,
-                    hash TEXT NOT NULL,
-                    previousBlockHash TEXT NOT NULL,
-                    merkleRoot TEXT NOT NULL
-                )`, (createErr) => {
-                    if (createErr) {
-                        console.error('Error creating table:', createErr.message);
-                        reject(createErr);
-                    } else {
-                        console.log('Table "bchain" ensured to exist.');
-                        // Create the Genesis Block if it doesn't exist
-                        const genesisSql = `SELECT COUNT(*) AS count FROM bchain`;
-                        db.get(genesisSql, [], (genesisErr, row) => {
-                            if (genesisErr) {
-                                console.error('Error checking Genesis Block:', genesisErr.message);
-                                reject(genesisErr);
-                            } else if (row.count > 0) {
-                                console.log('Genesis Block already exists.');
-                            } else {
-                                console.log('Creating Genesis Block...');
-                                // Insert the Genesis Block
-                                const sql = `INSERT INTO bchain
-                                    (timestamp, transactions, nonce, hash, previousBlockHash, merkleRoot)
-                                    VALUES (${Date.now()}, '', 100, 0, 0, '' )`;
-                                db.run(sql, []
-                                    , function (err) {
-                                        if (err) {
-                                            console.error('Error creating Genesis Block:', err.message);
-                                            reject(err);
-                                        } else {
-                                            console.log(`Genesis Block created `);
-                                            resolve(row);
-                                        }
-                                    });
-                            }
-                        });
-                        resolve(db);
-                    }
-                });
+            if (err) return reject(err);
 
-                db.run(`CREATE TABLE IF NOT EXISTS transactions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    projId INTEGER NOT NULL DEFAULT 1, -- Assuming projId is always 1 for this node
-                    transaction_id TEXT UNIQUE NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    submitter_id TEXT NOT NULL,
-                    station_id TEXT,
-                    so2 REAL,
-                    no2 REAL,
-                    pm10 REAL,
-                    pm2_5 REAL,
-                    raw_data_json TEXT NOT NULL,
-                    rowHash TEXT NOT NULL
-                )`, (createErr) => {
-                    if (createErr) {
-                        console.error('Error creating table:', createErr.message);
-                        reject(createErr);
-                    } else {
-                        console.log('Table "transactions" ensured to exist.');
-                        resolve(db);
-                    }
+            console.log(`Connected to SQLite database at ${DB_FILE}`);
+
+            const ensureBchain = `CREATE TABLE IF NOT EXISTS bchain (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                transactions TEXT NOT NULL,
+                nonce INTEGER NOT NULL,
+                hash TEXT NOT NULL,
+                previousBlockHash TEXT NOT NULL,
+                merkleRoot TEXT NOT NULL
+            )`;
+
+            const ensureTransactions = `CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id TEXT UNIQUE NOT NULL,
+                projId INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                submitter_id TEXT NOT NULL,
+                station_id TEXT,
+                so2 REAL,
+                no2 REAL,
+                pm10 REAL,
+                pm2_5 REAL,
+                raw_data_json TEXT NOT NULL,
+                rowHash TEXT NOT NULL
+            )`;
+
+            // Ensure both tables exist first
+            db.run(ensureBchain, (err) => {
+                if (err) return reject(err);
+                console.log('Table "bchain" ensured to exist.');
+
+                db.run(ensureTransactions, (err) => {
+                    if (err) return reject(err);
+                    console.log('Table "transactions" ensured to exist.');
+
+                    // Now check for Genesis Block
+                    const genesisCheck = `SELECT COUNT(*) AS count FROM bchain`;
+                    db.get(genesisCheck, [], (err, row) => {
+                        if (err) return reject(err);
+
+                        if (row.count > 0) {
+                            console.log('Genesis Block already exists.');
+                            resolve(db);
+                        } else {
+                            console.log('Creating Genesis Block...');
+                            const insertGenesis = `
+                                INSERT INTO bchain (timestamp, transactions, nonce, hash, previousBlockHash, merkleRoot)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            `;
+                            const values = [Date.now().toString(), '', 100, '0', '0', ''];
+                            db.run(insertGenesis, values, function (err) {
+                                if (err) return reject(err);
+                                console.log('Genesis Block created.');
+                                resolve(db);
+                            });
+                        }
+                    });
                 });
-            }
+            });
         });
     });
 }
+
 
 /**
  * Closes the database connection.
@@ -137,8 +127,6 @@ function createTransaction(transactionData) {
         }
 
         const {
-            transactionId,
-            timestamp,
             submitterId,
             stationID,
             SO2,
@@ -147,15 +135,17 @@ function createTransaction(transactionData) {
             PM2_5
         } = transactionData;
 
+        const timestamp = Date.now(); // Use ISO format for consistency
         const rawDataJson = JSON.stringify(transactionData);
+        const transactionId = uuidv4().split('-').join(''); // Generate a unique transaction ID
+        const transactionHash = sha256(transactionId+timestamp+JSON.stringify(transactionData)); // Generate a hash of the transaction data
 
         const sql = `INSERT INTO transactions
                      (projId,transaction_id, timestamp, submitter_id, station_id, so2, no2, pm10, pm2_5, raw_data_json, rowHash)
                      VALUES (?,?, ?, ?, ?, ?, ?, ?, ?, ?,?)`;
-
         db.run(sql, [
             theProj, // Use the project ID from command line arguments
-            transactionId,
+            transactionId, // Unique transaction ID
             timestamp,
             submitterId,
             stationID,
@@ -163,15 +153,16 @@ function createTransaction(transactionData) {
             NO2,
             PM10,
             PM2_5,
-            rawDataJson,
-            ''
+            rawDataJson, // Store the full transaction data as JSON
+            transactionHash // Store the hash of the transaction data
         ], function (err) {
             if (err) {
                 console.error('Error inserting transaction:', err.message);
                 reject(err);
             } else {
-                console.log(`A row has been inserted with ID: ${this.lastID}`);
-                resolve({ id: this.lastID, ...transactionData });
+                // console.log(`A row has been inserted with ID: ${this.lastID}`);
+                console.log(`A row has been inserted with ID: ${transactionId}`);
+                resolve({ transactionId, rawDataJson,transactionHash, ...transactionData });
             }
         });
     });
@@ -202,8 +193,8 @@ function readAllTransactions() {
                     NO2: row.no2,
                     PM10: row.pm10,
                     PM2_5: row.pm2_5,
-                    // Optionally parse the full data if needed for display
-                    fullData: JSON.parse(row.raw_data_json)
+                    fullData: JSON.parse(row.raw_data_json),
+                    rowHash: row.rowHash
                 }));
                 resolve(transactions);
             }

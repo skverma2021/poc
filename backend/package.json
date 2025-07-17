@@ -17,12 +17,12 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon --watch . -e js index.js",
-    "projA": "nodemon --watch . -e js index.js 3001 http://localhost:3001/api/fs 1 projA.db",
-    "projB": "nodemon --watch . -e js index.js 3002 http://localhost:3002/api/fs 2 projB.db",
-    "regAuth": "nodemon --watch . -e js index.js 3003 http://localhost:3003/api/fs 0 regAuth.db"
+    "projA": "nodemon --watch . -e js index.js 3001 http://localhost:3001/api/ 1 projA.db",
+    "projB": "nodemon --watch . -e js index.js 3002 http://localhost:3002/api/ 2 projB.db",
+    "regAuth": "nodemon --watch . -e js index.js 3003 http://localhost:3003/api/ 0 regAuth.db"
   },
   "dependencies": {
+    "axios": "^1.10.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "nodemon": "^3.1.10",

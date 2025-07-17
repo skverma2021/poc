@@ -2,6 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Import your database functions
+const network = require('./network');
+const axios = require('axios');
 
 // POST /api/transactions
 // Creates a new transaction record
@@ -34,6 +36,25 @@ router.post('/', async (req, res) => {
         }
         res.status(500).json({ error: 'Failed to add transaction.' });
     }
+});
+
+router.post('/broadcast', async function (req, res) {
+    const transactionData = req.body;
+	try {
+        await db.createTransaction(transactionData);
+		// Prepare POST requests to all other nodes in the network
+		const broadcastPromises = network.networkNodes.map(networkNodeUrl => {
+			return axios.post(networkNodeUrl + '/transactions', transactionData);
+		});
+
+		// Wait for all requests to finish
+		await Promise.all(broadcastPromises);
+
+		res.json({ note: 'Transaction created and broadcast successfully.' });
+	} catch (error) {
+		console.error('Broadcast failed:', error.message);
+		res.status(500).json({ note: 'Transaction broadcast failed.', error: error.message });
+	}
 });
 
 // GET /api/transactions
