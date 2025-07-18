@@ -6,56 +6,63 @@ const network = require('./network');
 const axios = require('axios');
 
 // POST /api/transactions
-// Creates a new transaction record
-router.post('/', async (req, res) => {
+// This endpoint receives transactions from other nodes or the local UI
+router.post('/', async (req, res) => { // This is the /api/transactions POST
     try {
         const transactionData = req.body;
 
-        // --- IMPORTANT: Add your blockchain validation logic here ---
-        // Before creating the transaction in SQLite, you would:
-        // 1. Calculate the hash of the transactionData.
-        // 2. Get the hash of the previous block from your 'blocks' table.
-        // 3. Construct a new 'block' object (or modify transactionData to include block-specific info).
-        // 4. Perform cryptographic validation (e.g., check previousHash, calculate new block hash).
-        // 5. Perform compliance rule validation on transactionData (e.g., SO2 limits).
-        //    As discussed, non-compliance usually doesn't prevent inclusion, but might be flagged.
+        // Perform basic validation for the incoming transaction
+        // (e.g., check required fields, data types)
+        if (!transactionData.transactionId || !transactionData.timestamp || !transactionData.submitterId) {
+             return res.status(400).json({ error: 'Missing mandatory transaction fields.' });
+        }
 
-        // For this CRUD example, we'll directly create the transaction in the DB.
-        // In a real blockchain, this would be part of the 'addBlock' process.
+        // --- IMPORTANT: Add your transaction-specific compliance validation here ---
+        // For example, if SO2 is outside a range, you might log a warning
+        // but still accept into mempool (as discussed for compliance-level errors).
+        // If it's a structural or data type error, you'd reject.
 
-        const newTransaction = await db.createTransaction(transactionData);
+        await db.createTransaction(transactionData); // This now inserts into mempool_transactions
+
         res.status(201).json({
-            message: 'Transaction added successfully',
-            transaction: newTransaction
+            message: 'Transaction accepted into mempool.',
+            transaction: transactionData
         });
     } catch (error) {
         console.error('Error in POST /api/transactions:', error.message);
-        // Handle unique constraint violation for transaction_id
-        if (error.message.includes('SQLITE_CONSTRAINT: UNIQUE constraint failed: transactions.transaction_id')) {
-            return res.status(409).json({ error: 'Transaction ID already exists.' });
+        if (error.message.includes('SQLITE_CONSTRAINT: UNIQUE constraint failed: mempool_transactions.transaction_id')) {
+            return res.status(409).json({ error: 'Transaction ID already exists in mempool.' });
         }
-        res.status(500).json({ error: 'Failed to add transaction.' });
+        res.status(500).json({ error: 'Failed to accept transaction.' });
     }
 });
 
+
+// POST /api/transactions/broadcast
+// This route is called by a node to submit its own transaction and broadcast it
+// to other nodes' /api/transactions endpoints.
 router.post('/broadcast', async function (req, res) {
     const transactionData = req.body;
-	try {
-        await db.createTransaction(transactionData);
-		// Prepare POST requests to all other nodes in the network
-		const broadcastPromises = network.networkNodes.map(networkNodeUrl => {
-			return axios.post(networkNodeUrl + '/transactions', transactionData);
-		});
+    try {
+        // First, add the transaction to this node's own mempool
+        await db.createTransaction(transactionData); // This also inserts into mempool_transactions
 
-		// Wait for all requests to finish
-		await Promise.all(broadcastPromises);
+        // Then, prepare POST requests to all other known nodes to their /api/transactions endpoint
+        const broadcastPromises = network.networkNodes.map(networkNodeUrl => {
+            // Make sure the URL is correct, it should hit the /api/transactions endpoint on peers
+            return axios.post(`${networkNodeUrl}/api/transactions`, transactionData);
+        });
 
-		res.json({ note: 'Transaction created and broadcast successfully.' });
-	} catch (error) {
-		console.error('Broadcast failed:', error.message);
-		res.status(500).json({ note: 'Transaction broadcast failed.', error: error.message });
-	}
+        await Promise.all(broadcastPromises);
+
+        res.json({ note: 'Transaction created locally and broadcast successfully.' });
+    } catch (error) {
+        console.error('Transaction broadcast failed:', error.message);
+        // Distinguish between local DB error and broadcast errors
+        res.status(500).json({ note: 'Transaction broadcast failed.', error: error.message });
+    }
 });
+
 
 // GET /api/transactions
 // Retrieves all transaction records
