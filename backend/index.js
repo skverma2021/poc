@@ -12,6 +12,8 @@ network.myNodeUrl = process.argv[3]; // Node URL from package.json script
 const REG_AUTH_ID = process.argv[4]; // 0 for RegAuth, 1 for ProjA, 2 for ProjB etc.
 const DB_FILE_NAME = process.argv[5] || 'default.db'; // DB file name from package.json
 
+db.setProjId(REG_AUTH_ID);
+
 // Set the DB_FILE in db.js dynamically based on node
 db.setDbFile(DB_FILE_NAME); // You'll need to add a setDbFile function in db.js
 

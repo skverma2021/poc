@@ -5,35 +5,42 @@ const fs = require('fs');
 const crypto = require('crypto'); // Use Node's built-in crypto module for sha256
 const { v4: uuidv4 } = require('uuid');
 
-// These should ideally be passed in or derived from a config, not global process.argv
-// For now, let's keep them as is for direct compatibility with your existing snippets.
-let theProj; // Will be set by setProjId
-let fileName; // Will be set by setDbFile
+let theProj; // Stores the project ID (0 for RegAuth, 1 for ProjA, etc.)
+let fileName; // Stores the database file name (e.g., projA.db)
+let DB_FILE_PATH; // Stores the full path to the SQLite database file
 
-let DB_FILE_PATH; // This variable will hold the full path to the DB file
+// Global database instance for this module
+let db;
 
+/**
+ * Sets the project ID for the current node. This is used when inserting transactions.
+ * @param {string|number} projId The ID of the project/node.
+ */
 function setProjId(projId) {
     theProj = projId;
 }
 
+/**
+ * Sets the database file name and ensures the 'data' directory exists.
+ * This must be called before initDb().
+ * @param {string} fname The name of the database file (e.g., 'projA.db').
+ */
 function setDbFile(fname) {
     fileName = fname;
     DB_FILE_PATH = path.join(__dirname, 'data', fileName);
     console.log(`Using database file at: ${DB_FILE_PATH}`);
 
-    // Ensure the 'data' directory exists when the file path is set
     const dataDir = path.join(__dirname, 'data');
     if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir);
+        console.log(`Created data directory: ${dataDir}`);
     }
 }
 
-
-let db; // Global database instance for this module
-
 /**
- * Initializes the database connection and creates the 'bchain', 'mempool_transactions', and 'confirmed_transactions' tables if they do not exist.
- * Ensures a genesis block exists in 'bchain'.
+ * Initializes the database connection and creates 'bchain', 'mempool_transactions',
+ * and 'confirmed_transactions' tables if they do not exist.
+ * Ensures a genesis block exists in 'bchain' for Regulator (projId '0').
  * @returns {Promise<sqlite3.Database>} A promise that resolves with the database object.
  */
 function initDb() {
@@ -49,10 +56,19 @@ function initDb() {
             }
             console.log(`Connected to SQLite database at ${DB_FILE_PATH}`);
 
+            // Enable foreign key constraints
+            db.run('PRAGMA foreign_keys = ON;', (pragmaErr) => {
+                if (pragmaErr) {
+                    console.error('Error enabling foreign keys:', pragmaErr.message);
+                    return reject(pragmaErr);
+                }
+                console.log('Foreign key enforcement enabled.');
+            });
+
             // 1. Create 'bchain' table for blocks
             const ensureBchain = `CREATE TABLE IF NOT EXISTS bchain (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                blockIndex INTEGER NOT NULL UNIQUE, -- Added unique index for easy retrieval
+                blockIndex INTEGER NOT NULL UNIQUE,
                 timestamp TEXT NOT NULL,
                 transactions TEXT NOT NULL, -- JSON string of transaction IDs/hashes in the block
                 nonce INTEGER NOT NULL,
@@ -65,7 +81,7 @@ function initDb() {
             const ensureMempoolTransactions = `CREATE TABLE IF NOT EXISTS mempool_transactions (
                 internal_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 transaction_id TEXT UNIQUE NOT NULL, -- This is your UUID
-                projId INTEGER NOT NULL,
+                projId TEXT NOT NULL, -- Changed to TEXT to match process.argv[4] type
                 timestamp TEXT NOT NULL,
                 submitter_id TEXT NOT NULL,
                 station_id TEXT,
@@ -81,8 +97,8 @@ function initDb() {
             const ensureConfirmedTransactions = `CREATE TABLE IF NOT EXISTS confirmed_transactions (
                 internal_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 transaction_id TEXT UNIQUE NOT NULL, -- This is your UUID
-                block_id INTEGER NOT NULL, -- Foreign key to bchain.id (optional, but good for linking)
-                projId INTEGER NOT NULL,
+                block_id INTEGER NOT NULL, -- Foreign key to bchain.id
+                projId TEXT NOT NULL, -- Changed to TEXT to match process.argv[4] type
                 timestamp TEXT NOT NULL,
                 submitter_id TEXT NOT NULL,
                 station_id TEXT,
@@ -110,24 +126,25 @@ function initDb() {
                     console.log('Table "confirmed_transactions" ensured to exist.');
                 });
 
-                // Check and create Genesis Block
+                // Check and create Genesis Block (only for RegAuth, projId '0')
+                // This check should ideally be in initDb on ALL nodes, but only for RegAuth should it create.
+                // Other nodes will receive the genesis block from RegAuth.
                 db.get(`SELECT COUNT(*) AS count FROM bchain`, [], (err, row) => {
                     if (err) { console.error('Error checking genesis block:', err.message); return reject(err); }
 
                     if (row.count > 0) {
                         console.log('Genesis Block already exists.');
                         resolve(db);
-                    } else {
-                        console.log('Creating Genesis Block...');
-                        // Genesis block details (adjust as needed for your actual block structure)
+                    } else if (theProj === '0') { // Only RegAuth (ID '0') creates the genesis block
+                        console.log('Creating Genesis Block for Regulator node...');
                         const genesisBlock = {
-                            blockIndex: 0, // Genesis block is index 0
-                            timestamp: Date.now().toString(),
-                            transactions: '[]', // Empty array of transactions for genesis
-                            nonce: 0, // No PoW for PoA
-                            hash: crypto.createHash('sha256').update('genesis_block_data').digest('hex'), // A unique hash for genesis
+                            blockIndex: 0,
+                            timestamp: new Date().toISOString(),
+                            transactions: '[]', // No actual transactions in genesis block
+                            nonce: 0,
+                            hash: crypto.createHash('sha256').update('regulator_genesis_block_v1').digest('hex'), // A unique, fixed hash for genesis
                             previousBlockHash: '0', // Standard for genesis
-                            merkleRoot: crypto.createHash('sha256').update('genesis_merkle_root').digest('hex') // Merkle root for empty transactions
+                            merkleRoot: crypto.createHash('sha256').update('genesis_merkle_root_v1').digest('hex') // Merkle root for empty transactions
                         };
 
                         const insertGenesis = `
@@ -147,6 +164,10 @@ function initDb() {
                             console.log('Genesis Block created.');
                             resolve(db);
                         });
+                    } else {
+                        // For non-RegAuth nodes, genesis block will be received from RegAuth
+                        console.log('No genesis block found. Awaiting genesis block from RegAuth node.');
+                        resolve(db);
                     }
                 });
             });
@@ -154,7 +175,8 @@ function initDb() {
     });
 }
 
-// ... (closeDb function remains the same) ...
+// -----------------------------------------------------------------------------
+
 /**
  * Closes the database connection.
  * @returns {Promise<void>} A promise that resolves when the database is closed.
@@ -177,6 +199,8 @@ function closeDb() {
     });
 }
 
+// -----------------------------------------------------------------------------
+
 /**
  * Creates (Inserts) a new transaction record into the **mempool_transactions** table.
  * @param {Object} transactionData The transaction object to insert.
@@ -187,13 +211,16 @@ function createTransaction(transactionData) {
         if (!db) {
             return reject(new Error("Database not initialized. Call initDb() first."));
         }
+        if (!theProj) {
+            return reject(new Error("Project ID not set. Call setProjId() first."));
+        }
 
-        const timestamp = new Date().toISOString(); // Using ISO string for consistency
+        const timestamp = new Date().toISOString();
 
-        // Destructure only the necessary fields for storage
+        // Destructure only the necessary fields for storage, ensure all are included.
+        // It's safer to use a comprehensive list of fields to avoid missing data.
         const { submitterId, stationID, SO2, NO2, PM10, PM2_5 } = transactionData;
 
-        // Generate unique ID and hash for the transaction
         const transactionId = uuidv4().split('-').join('');
         const dataToHash = transactionId + timestamp + JSON.stringify(transactionData);
         const transactionHash = crypto.createHash('sha256').update(dataToHash).digest('hex');
@@ -204,7 +231,7 @@ function createTransaction(transactionData) {
                      (projId, transaction_id, timestamp, submitter_id, station_id, so2, no2, pm10, pm2_5, raw_data_json, rowHash)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         db.run(sql, [
-            theProj,
+            theProj, // Use the project ID set by setProjId
             transactionId,
             timestamp,
             submitterId,
@@ -221,12 +248,14 @@ function createTransaction(transactionData) {
                 reject(err);
             } else {
                 console.log(`Transaction inserted into mempool with ID: ${transactionId}`);
-                // Resolve with the complete transaction data as it would be added to mempool
-                resolve({ transactionId, timestamp, rawDataJson, rowHash: transactionHash, ...transactionData });
+                // Resolve with the complete transaction data, including generated IDs/hashes
+                resolve({ transactionId, timestamp, rowHash: transactionHash, projId: theProj, ...transactionData });
             }
         });
     });
 }
+
+// -----------------------------------------------------------------------------
 
 /**
  * Reads (Retrieves) all transaction records from the **confirmed_transactions** table.
@@ -237,7 +266,6 @@ function readAllTransactions() {
         if (!db) {
             return reject(new Error("Database not initialized. Call initDb() first."));
         }
-        // Changed to read from confirmed_transactions
         const sql = `SELECT * FROM confirmed_transactions ORDER BY timestamp DESC`;
         db.all(sql, [], (err, rows) => {
             if (err) {
@@ -245,9 +273,9 @@ function readAllTransactions() {
                 reject(err);
             } else {
                 const transactions = rows.map(row => ({
-                    internal_id: row.internal_id, // Renamed from 'id' to avoid confusion with transaction_id
+                    internal_id: row.internal_id,
                     transactionId: row.transaction_id,
-                    block_id: row.block_id,
+                    block_id: row.block_id, // Link to the block it belongs to
                     projId: row.projId,
                     timestamp: row.timestamp,
                     submitterId: row.submitter_id,
@@ -265,8 +293,7 @@ function readAllTransactions() {
     });
 }
 
-
-// --- New functions for mempool and block management (modified to use new tables) ---
+// -----------------------------------------------------------------------------
 
 /**
  * Gets the current count of transactions in the **mempool_transactions** table.
@@ -288,9 +315,11 @@ function getMempoolCount() {
     });
 }
 
+// -----------------------------------------------------------------------------
+
 /**
  * Retrieves a specified number of transactions from the **mempool_transactions** for block creation.
- * Returns raw data objects as they were stored in the mempool.
+ * Returns the full transaction objects, parsed from raw_data_json.
  * @param {number} limit The maximum number of transactions to retrieve.
  * @returns {Promise<Array<Object>>} A promise that resolves with an array of transactions.
  */
@@ -299,20 +328,30 @@ function getTransactionsForBlock(limit) {
         if (!db) {
             return reject(new Error("Database not initialized. Call initDb() first."));
         }
+        // Order by timestamp to get the oldest transactions first (FIFO)
         db.all(`SELECT * FROM mempool_transactions ORDER BY timestamp ASC LIMIT ?`, [limit], (err, rows) => {
             if (err) {
                 console.error('Error getting transactions for block:', err.message);
                 reject(err);
             } else {
                 const transactions = rows.map(row => {
-                    // Return the full transaction object as needed for Merkle tree and block data
-                    return JSON.parse(row.raw_data_json);
+                    // Reconstruct the full transaction object, including the generated IDs/hashes
+                    const fullTx = JSON.parse(row.raw_data_json);
+                    return {
+                        ...fullTx,
+                        transactionId: row.transaction_id,
+                        projId: row.projId,
+                        timestamp: row.timestamp, // Use the stored timestamp for consistency
+                        rowHash: row.rowHash
+                    };
                 });
                 resolve(transactions);
             }
         });
     });
 }
+
+// -----------------------------------------------------------------------------
 
 /**
  * Removes transactions from the **mempool_transactions** after they have been included in a block.
@@ -327,6 +366,7 @@ function removeTransactionsFromMempool(transactionIds) {
         if (transactionIds.length === 0) {
             return resolve(0);
         }
+        // Create a string of placeholders for the IN clause: ?, ?, ?
         const placeholders = transactionIds.map(() => '?').join(',');
         db.run(`DELETE FROM mempool_transactions WHERE transaction_id IN (${placeholders})`, transactionIds, function(err) {
             if (err) {
@@ -340,10 +380,12 @@ function removeTransactionsFromMempool(transactionIds) {
     });
 }
 
+// -----------------------------------------------------------------------------
 
 /**
  * Adds a confirmed block to the 'bchain' table and its transactions to 'confirmed_transactions'.
- * @param {Object} block The block object to add.
+ * This operation is wrapped in a database transaction for atomicity.
+ * @param {Object} block The block object to add, including its transactions array.
  * @returns {Promise<Object>} A promise that resolves with the added block.
  */
 function addBlockToBlockchain(block) {
@@ -353,45 +395,54 @@ function addBlockToBlockchain(block) {
         }
 
         const { blockIndex, timestamp, transactions, nonce, hash, previousBlockHash, merkleRoot } = block;
-        const transactionsJson = JSON.stringify(transactions.map(tx => ({
+
+        // Store a lightweight representation of transactions in the block metadata (e.g., just IDs and hashes)
+        const lightweightTransactions = transactions.map(tx => ({
             transactionId: tx.transactionId,
-            rowHash: tx.rowHash // Ensure these are part of the original transaction objects
-        }))); // Store only relevant parts or full raw data if needed
+            rowHash: tx.rowHash
+        }));
+        const transactionsJson = JSON.stringify(lightweightTransactions);
 
-        db.serialize(() => {
-            db.run("BEGIN TRANSACTION;");
+        db.serialize(() => { // Use serialize to ensure sequential operations within this section
+            db.run("BEGIN TRANSACTION;", (beginErr) => {
+                if (beginErr) {
+                    console.error('Error beginning transaction:', beginErr.message);
+                    return reject(beginErr);
+                }
+            });
 
-            // Insert block metadata into 'bchain' table
+            // 1. Insert block metadata into 'bchain' table
             const insertBlockSql = `INSERT INTO bchain
                                     (blockIndex, timestamp, transactions, nonce, hash, previousBlockHash, merkleRoot)
                                     VALUES (?, ?, ?, ?, ?, ?, ?)`;
             db.run(insertBlockSql, [
                 blockIndex,
                 timestamp,
-                transactionsJson, // Storing serialized transactions
+                transactionsJson,
                 nonce,
                 hash,
                 previousBlockHash,
                 merkleRoot
             ], function(err) {
                 if (err) {
-                    db.run("ROLLBACK;");
+                    db.run("ROLLBACK;", () => console.error('Transaction rolled back due to block insertion error.'));
                     console.error('Error inserting block into bchain:', err.message);
                     return reject(err);
                 }
-                const block_id = this.lastID; // Get the ID of the newly inserted block
+                const block_id = this.lastID; // Get the ID of the newly inserted block in 'bchain'
 
-                // Insert each transaction into the 'confirmed_transactions' table
+                // 2. Insert each transaction into the 'confirmed_transactions' table
                 const insertTxPromises = transactions.map(tx => {
                     return new Promise((res, rej) => {
-                        const { transactionId, projId, timestamp, submitterId, stationID, SO2, NO2, PM10, PM2_5, rawDataJson, rowHash } = tx; // Ensure all these are present in the transaction object from getTransactionsForBlock
+                        // Ensure all necessary fields are available in the 'tx' object
+                        const { transactionId, projId, timestamp, submitterId, stationID, SO2, NO2, PM10, PM2_5, rawDataJson, rowHash } = tx;
                         const sql = `INSERT INTO confirmed_transactions
                                      (transaction_id, block_id, projId, timestamp, submitter_id, station_id, so2, no2, pm10, pm2_5, raw_data_json, rowHash)
                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
                         db.run(sql, [
                             transactionId, block_id, projId, timestamp, submitterId, stationID, SO2, NO2, PM10, PM2_5, rawDataJson, rowHash
-                        ], function(err) {
-                            if (err) rej(err);
+                        ], function(txErr) {
+                            if (txErr) rej(txErr);
                             else res();
                         });
                     });
@@ -399,10 +450,11 @@ function addBlockToBlockchain(block) {
 
                 Promise.all(insertTxPromises)
                     .then(() => {
+                        // 3. Commit the database transaction
                         db.run("COMMIT;", (commitErr) => {
                             if (commitErr) {
                                 console.error('Error committing block transaction:', commitErr.message);
-                                db.run("ROLLBACK;");
+                                db.run("ROLLBACK;", () => console.error('Transaction rolled back due to commit error.'));
                                 reject(commitErr);
                             } else {
                                 console.log(`Block (index ${blockIndex}) added to blockchain with ${transactions.length} transactions and committed.`);
@@ -412,7 +464,7 @@ function addBlockToBlockchain(block) {
                     })
                     .catch(insertErr => {
                         console.error('Error inserting confirmed transactions:', insertErr.message);
-                        db.run("ROLLBACK;");
+                        db.run("ROLLBACK;", () => console.error('Transaction rolled back due to confirmed transactions insertion error.'));
                         reject(insertErr);
                     });
             });
@@ -420,9 +472,11 @@ function addBlockToBlockchain(block) {
     });
 }
 
+// -----------------------------------------------------------------------------
+
 /**
  * Gets the last block from the 'bchain' table.
- * @returns {Promise<Object>} A promise that resolves with the last block object, or null if no blocks exist.
+ * @returns {Promise<Object|null>} A promise that resolves with the last block object, or null if no blocks exist.
  */
 function getLastBlock() {
     return new Promise((resolve, reject) => {
@@ -435,11 +489,11 @@ function getLastBlock() {
                 reject(err);
             } else {
                 if (row) {
-                    // Parse the transactions JSON back into an array if needed
+                    // Parse the transactions JSON string back into an array of objects
                     row.transactions = JSON.parse(row.transactions);
                     resolve(row);
                 } else {
-                    // This case should ideally not happen if Genesis block is always created
+                    // This case should ideally not happen if Genesis block is always created for RegAuth
                     resolve(null);
                 }
             }
@@ -447,40 +501,18 @@ function getLastBlock() {
     });
 }
 
+// -----------------------------------------------------------------------------
 
 module.exports = {
     initDb,
     closeDb,
-    setProjId, // Export new setter
-    setDbFile, // Export new setter
-    createTransaction, // Now inserts into mempool
-    readAllTransactions, // Now reads from confirmed transactions
+    setProjId,
+    setDbFile,
+    createTransaction,
+    readAllTransactions,
     getMempoolCount,
     getTransactionsForBlock,
     removeTransactionsFromMempool,
     addBlockToBlockchain,
     getLastBlock,
 };
-
-
-/**
- * Closes the database connection.
- * @returns {Promise<void>} A promise that resolves when the database is closed.
- */
-// function closeDb() {
-//     return new Promise((resolve, reject) => {
-//         if (db) {
-//             db.close((err) => {
-//                 if (err) {
-//                     console.error('Error closing database:', err.message);
-//                     reject(err);
-//                 } else {
-//                     console.log('Database connection closed.');
-//                     resolve();
-//                 }
-//             });
-//         } else {
-//             resolve(); // No database open
-//         }
-//     });
-// }
