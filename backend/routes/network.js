@@ -8,14 +8,15 @@ let networkNodes = []; // All known peer nodes (excluding self)
 
 
 router.post('/register-and-broadcast-node', (req, res) => {
-    console.log('Registering and broadcasting new node...');
     const newNodeUrl = req.body.newNodeUrl;
+    console.log('Registering and broadcasting new node...', newNodeUrl);
     if (!networkNodes.includes(newNodeUrl) && newNodeUrl !== myNodeUrl) {
         networkNodes.push(newNodeUrl);
     }
 
     // Broadcast this new node to all existing nodes
     const regPromises = networkNodes.map(existingNodeUrl => {
+        console.log(`Registering new node with existing node: ${existingNodeUrl}/network/register-node`);
         return axios.post(`${existingNodeUrl}/network/register-node`, { newNodeUrl });
     });
 

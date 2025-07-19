@@ -230,6 +230,7 @@ function createTransaction(transactionData) {
         const sql = `INSERT INTO mempool_transactions
                      (projId, transaction_id, timestamp, submitter_id, station_id, so2, no2, pm10, pm2_5, raw_data_json, rowHash)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        console.log(theProj, transactionId, timestamp, submitterId, stationID, SO2, NO2, PM10, PM2_5, rawDataJson, transactionHash)
         db.run(sql, [
             theProj, // Use the project ID set by setProjId
             transactionId,
@@ -249,7 +250,14 @@ function createTransaction(transactionData) {
             } else {
                 console.log(`Transaction inserted into mempool with ID: ${transactionId}`);
                 // Resolve with the complete transaction data, including generated IDs/hashes
-                resolve({ transactionId, timestamp, rowHash: transactionHash, projId: theProj, ...transactionData });
+                resolve({ transactionId, timestamp, rowHash: transactionHash, projId: theProj, rawDataJson, ...transactionData });
+
+            // } else {
+            //     console.log(`Transaction inserted into mempool with ID: ${transactionId}`);
+            //     // Ensure rawDataJson is included here!
+            //     resolve({ transactionId, timestamp, rowHash: transactionHash, projId: theProj, rawDataJson, ...transactionData });
+            // }
+
             }
         });
     });
